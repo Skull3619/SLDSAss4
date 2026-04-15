@@ -51,15 +51,22 @@ if run_q1:
 
     rank_df = feature_rankings(bundle.df, bundle.numeric_cols, bundle.target_col)
 
+    family_df = build_feature_family_table(bundle.numeric_cols)
+    if "family" in family_df.columns:
+        family_counts = (
+            family_df.groupby("family", as_index=False)
+            .size()
+            .rename(columns={"size": "count"})
+        )
+    else:
+        family_counts = family_df.copy()
+
     st.session_state["q1_payload"] = {
         "plot_df": plot_df,
         "rank_df": rank_df,
         "emb_method": emb_method,
         "cluster_method": cluster_method,
-        "family_counts": build_feature_family_table(bundle.numeric_cols)
-        .groupby("family", as_index=False)
-        .size()
-        .rename(columns={"size": "count"}),
+        "family_counts": family_counts,
     }
 
 payload = st.session_state.get("q1_payload")
