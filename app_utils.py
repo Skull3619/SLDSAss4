@@ -182,17 +182,35 @@ def standardize_frame(df: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return StandardScaler().fit_transform(X)
 
 
-def compute_embedding(df: pd.DataFrame, cols: list[str], method: str = "PCA", random_state: int = 42, perplexity: int = 20) -> pd.DataFrame:
-    Xs = standardize_frame(df, cols)
-    if len(df) < 2:
-        return pd.DataFrame({"emb_1": [0.0] * len(df), "emb_2": [0.0] * len(df)})
-    method = method.lower()
+def compute_embedding(df, numeric_cols, method="PCA", perplexity=20):
+    import numpy as np
+    import pandas as pd
+    from sklearn.decomposition import PCA
+    from sklearn.manifold import TSNE
+    from sklearn.preprocessing import StandardScaler
+
+    X = df[numeric_cols].copy()
+    X = X.replace([np.inf, -np.inf], np.nan)
+    X = X.fillna(X.median(numeric_only=True))
+
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    method = str(method).lower()
+
     if method == "pca":
-        emb = PCA(n_components=2, random_state=random_state).fit_transform(Xs)
+        emb = PCA(n_components=2, random_state=42).fit_transform(X_scaled)
     else:
-        perpl = min(max(5, perplexity), max(5, len(df) - 1))
-        emb = TSNE(n_components=2, random_state=random_state, perplexity=perpl, init="pca", learning_rate="auto").fit_transform(Xs)
-    return pd.DataFrame({"emb_1": emb[:, 0], "emb_2": emb[:, 1]})
+        p = min(max(5, int(perplexity)), max(5, len(X_scaled) - 1))
+        emb = TSNE(
+            n_components=2,
+            perplexity=p,
+            random_state=42,
+            init="pca",
+            learning_rate="auto",
+        ).fit_transform(X_scaled)
+
+    return pd.DataFrame(emb, columns=["emb_1", "emb_2"], index=df.index)
 
 
 def cluster_features(df, numeric_cols, method="kmeans", n_clusters=4, eps=0.9, min_samples=5):
