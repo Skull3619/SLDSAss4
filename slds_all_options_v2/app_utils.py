@@ -144,8 +144,6 @@ def standardize_frame(df: pd.DataFrame, cols: list[str]) -> np.ndarray:
     return StandardScaler().fit_transform(X)
 
 
-
-
 def shared_train_test_split(df: pd.DataFrame, target_col: str, test_size: float = 0.2, random_state: int = 42, key: str = "default"):
     """Use a shared split index in session_state when available."""
     state_key = f"shared_split::{key}::{len(df)}::{target_col}::{test_size}::{random_state}"
@@ -176,20 +174,37 @@ def fit_unsupervised_augmenter(train_df: pd.DataFrame, cols: list[str], n_pca: i
             "km": None,
             "iso": None,
             "n_pca": 0,
-            "n_clusters": 1,
+            "n_clusters": 0,
             "explained_variance_ratio": [],
-            "cluster_sizes": {0: len(train_df)},
+            "cluster_sizes": {},
         }
 
-    k = min(max(1, n_pca), min(Xs.shape[0] - 1, Xs.shape[1]))
-    pca = PCA(n_components=k, random_state=random_state)
-    pca.fit(Xs)
+    pca = None
+    explained_variance_ratio = []
+    if int(n_pca) > 0:
+        k = min(int(n_pca), min(Xs.shape[0] - 1, Xs.shape[1]))
+        if k > 0:
+            pca = PCA(n_components=k, random_state=random_state)
+            pca.fit(Xs)
+            explained_variance_ratio = pca.explained_variance_ratio_.tolist()
+        else:
+            k = 0
+    else:
+        k = 0
 
-    kk = min(max(2, n_clusters), len(train_df))
-    km = KMeans(n_clusters=kk, random_state=random_state, n_init=10)
-    train_labels = km.fit_predict(Xs)
-    unique, counts = np.unique(train_labels, return_counts=True)
-    cluster_sizes = {int(u): int(c) for u, c in zip(unique, counts)}
+    km = None
+    cluster_sizes = {}
+    if int(n_clusters) > 0:
+        kk = min(int(n_clusters), len(train_df))
+        if kk >= 2:
+            km = KMeans(n_clusters=kk, random_state=random_state, n_init=10)
+            train_labels = km.fit_predict(Xs)
+            unique, counts = np.unique(train_labels, return_counts=True)
+            cluster_sizes = {int(u): int(c) for u, c in zip(unique, counts)}
+        else:
+            kk = 0
+    else:
+        kk = 0
 
     iso = None
     if len(train_df) >= 10:
@@ -203,7 +218,7 @@ def fit_unsupervised_augmenter(train_df: pd.DataFrame, cols: list[str], n_pca: i
         "iso": iso,
         "n_pca": k,
         "n_clusters": kk,
-        "explained_variance_ratio": pca.explained_variance_ratio_.tolist(),
+        "explained_variance_ratio": explained_variance_ratio,
         "cluster_sizes": cluster_sizes,
     }
 
@@ -214,13 +229,13 @@ def transform_with_unsupervised_augmenter(df: pd.DataFrame, cols: list[str], aug
     Xs = augmenter["scaler"].transform(X)
 
     pca = augmenter.get("pca")
-    if pca is not None:
+    if pca is not None and int(augmenter.get("n_pca", 0)) > 0:
         comps = pca.transform(Xs)
         for i in range(comps.shape[1]):
             out[f"unsup_pca_{i+1}"] = comps[:, i]
 
     km = augmenter.get("km")
-    if km is not None:
+    if km is not None and int(augmenter.get("n_clusters", 0)) > 0:
         labels = km.predict(Xs)
         dists = np.linalg.norm(Xs - km.cluster_centers_[labels], axis=1)
         out["unsup_cluster"] = labels
@@ -236,6 +251,7 @@ def transform_with_unsupervised_augmenter(df: pd.DataFrame, cols: list[str], aug
         out["unsup_anomaly_score"] = 0.0
 
     return out
+
 
 def compute_embedding(df: pd.DataFrame, cols: list[str], method: str = "PCA", random_state: int = 42, perplexity: int = 20) -> pd.DataFrame:
     Xs = standardize_frame(df, cols)
