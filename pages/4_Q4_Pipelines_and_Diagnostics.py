@@ -18,6 +18,7 @@ with st.sidebar:
     test_size = st.slider("Test fraction", 0.1, 0.4, 0.2, 0.05)
     oversample = st.checkbox("Oversample minority class in training", value=False)
     random_state = st.number_input("Random seed", 0, 9999, 42, 1)
+
 if uploaded is None:
     st.info("Upload your extracted feature dataset.")
     st.stop()
@@ -121,8 +122,6 @@ if res is not None:
     st.subheader("Nearest-neighbor context for misclassified samples")
     if detail["neighbor_context"] is not None and not detail["neighbor_context"].empty:
         st.dataframe(detail["neighbor_context"].head(50), use_container_width=True)
-    else:
-        st.info("No nearest-neighbor context was generated.")
 
     st.subheader("Top feature importances / coefficients")
     if detail["feature_importance"] is not None:
@@ -135,8 +134,6 @@ if res is not None:
         )
         fig2.update_layout(xaxis_tickangle=-35)
         st.plotly_chart(fig2, use_container_width=True)
-    else:
-        st.info("This pipeline does not expose direct feature importances.")
 
     st.download_button(
         "Download benchmark CSV",
