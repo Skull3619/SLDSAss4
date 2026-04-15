@@ -2,57 +2,29 @@ from __future__ import annotations
 
 import streamlit as st
 
-st.set_page_config(page_title="Manufacturing Feasibility Analytics Suite", page_icon="🏭", layout="wide")
+st.set_page_config(page_title="Manufacturing Feasibility App", page_icon="🧩", layout="wide")
 
-st.title("🏭 Manufacturing Feasibility Analytics Suite")
-st.caption("Streamlit app for Q1 to Q4 using a precomputed feature table. Raw point-cloud feature extraction stays completely offline.")
-
-st.markdown(
+st.title("🧩 Manufacturing Feasibility Analysis App")
+st.write(
     """
-This project is split into two layers:
+This app is organized to match the assignment workflow:
 
-**Offline**
-- Read raw 3D point clouds from your local `feasible/` and `infeasible/` folders
-- Clean duplicates / obvious outliers
-- Extract a rich feature table
-- Save `CSV`, `XLSX`, or `Parquet`
+- **Q1 Visualization**: feature-space visualization, dimension reduction, clustering
+- **Q2 Smart Data Selection**: compare subset strategies and imbalance handling
+- **Q3 Feature Engineering**: rank features and create augmented feature sets
+- **Q4 Pipelines and Diagnostics**: benchmark many pipelines and inspect failures
+- **Q5 Overall Report**: consolidated summary and downloadable report artifacts
 
-**Online / Deployable Streamlit**
-- Upload the extracted feature table
-- Visualize and cluster the dataset
-- Simulate smart subset selection
-- Add unsupervised augmentations
-- Benchmark many pipelines
-- Diagnose misclassified samples
+Use the sidebar to move across pages.
 """
 )
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.subheader("Q1")
-    st.write("Visualization, PCA / t-SNE, clustering, outlier review, and data-quality summary.")
-with col2:
-    st.subheader("Q2")
-    st.write("Subset selection and class-imbalance simulations with F1 comparison.")
-with col3:
-    st.subheader("Q3")
-    st.write("Feature families, unsupervised augmentations, and feature-selection analysis.")
-with col4:
-    st.subheader("Q4")
-    st.write("50+ pipelines, benchmarking, confusion matrices, and misclassification diagnostics.")
-
-st.markdown("### Included offline extractor")
-st.code(
-    "python offline_feature_extractor.py --root_dir /path/to/dataset --output features.parquet --workers 4",
-    language="bash",
-)
-
-st.markdown("### Expected feature-table columns")
+st.subheader("Recommended workflow")
 st.write(
-    "The app auto-detects a label column and numeric feature columns. "
-    "It works best when the table includes `file_name`, `label`, `target`, and the extracted numeric descriptors."
-)
-
-st.info(
-    "Use the sidebar pages to run each assignment section. For deployment, keep `Home.py`, `pages/`, and `requirements.txt` in the repo."
+    """
+1. Extract features **offline** from the raw 3D point clouds.  
+2. Upload the extracted feature dataset to Pages 1 to 5.  
+3. Use Pages 1 to 4 to generate results.  
+4. Use Page 5 to download the overall report.
+"""
 )
