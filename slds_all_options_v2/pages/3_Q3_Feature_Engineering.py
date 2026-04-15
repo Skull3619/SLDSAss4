@@ -66,8 +66,8 @@ with st.sidebar:
     exclude_absolute = st.checkbox("Exclude absolute-position features", value=False)
     add_unsup = st.checkbox("Add unsupervised features", value=True)
     clustering_mode = st.selectbox("Clustering mode", ["KMeans", "Off"], index=0)
-    n_pca = st.slider("Unsupervised PCA components", 2, 6, 3)
-    n_clusters = st.slider("Cluster features", 2, 8, 4)
+    n_pca = st.slider("Unsupervised PCA components", 0, 6, 3)
+    n_clusters = st.slider("Cluster features", 0, 8, 4)
     eval_model = st.selectbox("Evaluation model", ["random_forest", "extra_trees", "logreg", "svm_rbf"], index=0)
     test_size = st.slider("Test fraction", 0.1, 0.4, 0.2, 0.05)
     random_state = st.number_input("Random seed", 0, 9999, 42, 1)
@@ -85,7 +85,7 @@ if run_q3:
             bundle.df,
             selected_cols,
             n_pca=n_pca,
-            n_clusters=(1 if clustering_mode == "Off" else n_clusters),
+            n_clusters=(0 if clustering_mode == "Off" else n_clusters),
             random_state=int(random_state),
         )
         aug_df = transform_with_unsupervised_augmenter(bundle.df, selected_cols, full_augmenter)
@@ -123,7 +123,7 @@ if run_q3:
             train_df,
             selected_cols,
             n_pca=n_pca,
-            n_clusters=(1 if clustering_mode == "Off" else n_clusters),
+            n_clusters=(0 if clustering_mode == "Off" else n_clusters),
             random_state=int(random_state),
         )
         train_aug = transform_with_unsupervised_augmenter(train_df, selected_cols, train_augmenter)
