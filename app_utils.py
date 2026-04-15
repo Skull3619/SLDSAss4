@@ -209,7 +209,15 @@ def feature_rankings(df: pd.DataFrame, cols: list[str], target_col: str, random_
             "abs_mean_gap": abs(float(pos[c].mean()) - float(neg[c].mean())),
         })
     out = pd.DataFrame(rows)
-    out["rank_score"] = out["mutual_info"] + out["rf_importance"] + out["abs_mean_gap"] / max(out["abs_mean_gap"].max(), 1e-12)
+    # out["rank_score"] = out["mutual_info"] + out["rf_importance"] + out["abs_mean_gap"] / max(out["abs_mean_gap"].max(), 1e-12)
+    out["mw_signal"] = -np.log10(out["mw_pvalue"].clip(lower=1e-300).fillna(1.0))
+
+    out["rank_score"] = (
+        0.35 * out["mutual_info"].rank(pct=True)
+        + 0.35 * out["rf_importance"].rank(pct=True)
+        + 0.15 * out["abs_mean_gap"].rank(pct=True)
+        + 0.15 * out["mw_signal"].rank(pct=True)
+    )
     return out.sort_values("rank_score", ascending=False).reset_index(drop=True)
 
 
