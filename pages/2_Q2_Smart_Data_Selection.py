@@ -6,13 +6,13 @@ import streamlit as st
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
-from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import StandardScaler
 
 from app_utils import infer_dataset_schema, load_feature_table
 
 st.set_page_config(page_title="Q2 Smart Data Selection", page_icon="🧠", layout="wide")
 st.title("🧠 Q2. Smart Data Selection")
+
 
 def oversample_minority(X: pd.DataFrame, y: pd.Series, random_state: int = 42) -> tuple[pd.DataFrame, pd.Series]:
     vc = y.value_counts()
@@ -34,13 +34,8 @@ def oversample_minority(X: pd.DataFrame, y: pd.Series, random_state: int = 42) -
         parts_y.append(y.iloc[full])
 
     X_new = pd.concat(parts_X, axis=0).sample(frac=1, random_state=random_state).reset_index(drop=True)
-    y_new = pd.concat(parts_y, axis=0).loc[X_new.index if isinstance(X_new.index, pd.Index) else :]
-
-    # Rebuild y cleanly to match X_new order
-    y_new = pd.Series(np.concatenate([p.values for p in parts_y]), name=y.name)
-    shuffled = np.arange(len(y_new))
-    rng.shuffle(shuffled)
-    return X_new.iloc[shuffled].reset_index(drop=True), y_new.iloc[shuffled].reset_index(drop=True)
+    y_new = pd.concat(parts_y, axis=0).reset_index(drop=True)
+    return X_new, y_new
 
 
 def evaluate_subset(
@@ -68,7 +63,6 @@ def evaluate_subset(
     clf.fit(X_sub, y_sub)
     pred = clf.predict(X_test)
 
-    labels = sorted(pd.Series(y_test).astype(str).unique().tolist())
     y_test_s = y_test.astype(str)
     pred_s = pd.Series(pred).astype(str)
 
@@ -154,16 +148,11 @@ def balanced_diversity_subset(X: np.ndarray, y: pd.Series, k: int, random_state:
     if len(chosen) < k:
         remaining = np.setdiff1d(idx_all, chosen)
         extra = remaining[: min(k - len(chosen), len(remaining))]
-        chosen = np.sort(np.concatenate([chosen, extra]))
-    return chosen[:k]
+        chosen = np.concatenate([chosen, extra])
+    return np.sort(chosen[:k])
 
 
-def uncertainty_subset(
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    k: int,
-    random_state: int,
-) -> np.ndarray:
+def uncertainty_subset(X_train: pd.DataFrame, y_train: pd.Series, k: int, random_state: int) -> np.ndarray:
     idx_seed = stratified_subset(y_train, min(max(20, k // 4), len(y_train)), random_state=random_state)
     clf = RandomForestClassifier(
         n_estimators=250,
@@ -181,13 +170,7 @@ def uncertainty_subset(
     return np.sort(order[:k])
 
 
-def hybrid_subset(
-    X_scaled: np.ndarray,
-    X_train: pd.DataFrame,
-    y_train: pd.Series,
-    k: int,
-    random_state: int,
-) -> np.ndarray:
+def hybrid_subset(X_scaled: np.ndarray, X_train: pd.DataFrame, y_train: pd.Series, k: int, random_state: int) -> np.ndarray:
     unc = uncertainty_subset(X_train, y_train, k, random_state=random_state)
     div = diversity_subset(X_scaled, k, random_state=random_state)
     merged = np.unique(np.concatenate([unc[: max(1, k // 2)], div[: max(1, k // 2)]]))
@@ -230,7 +213,6 @@ k = max(10, int(round(len(X_train) * subset_fraction)))
 
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
 
 strategies = {
     "random": random_subset(len(X_train), k, int(random_state)),
