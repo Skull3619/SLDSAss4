@@ -6,6 +6,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 from scipy.stats import mannwhitneyu
 from sklearn.cluster import DBSCAN, KMeans
 from sklearn.decomposition import PCA
@@ -17,6 +18,15 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 
 LABEL_TO_TARGET = {"infeasible": 0, "feasible": 1}
 ID_COLS = {"file_name", "file_path", "label", "target", "pred_target", "pred_label", "correct", "pipeline"}
+RESULT_KEYS = [
+    "q1_payload",
+    "q2_results",
+    "q3_rank_table",
+    "q3_augmented_df",
+    "q4_results",
+    "q4_detail",
+    "q5_report_ready",
+]
 
 
 @dataclass
@@ -93,6 +103,48 @@ def infer_dataset_schema(df: pd.DataFrame) -> DatasetBundle:
     if not numeric_cols:
         raise ValueError("No numeric feature columns were found.")
     return DatasetBundle(df=df, label_col=label_col, target_col=target_col, numeric_cols=numeric_cols)
+
+
+def clear_analysis_results() -> None:
+    for key in RESULT_KEYS:
+        st.session_state.pop(key, None)
+
+
+def set_active_dataset(df: pd.DataFrame, source_name: str) -> None:
+    bundle = infer_dataset_schema(df)
+    st.session_state["active_dataset_df"] = bundle.df
+    st.session_state["active_dataset_bundle"] = bundle
+    st.session_state["active_dataset_name"] = source_name
+    st.session_state["active_dataset_token"] = st.session_state.get("active_dataset_token", 0) + 1
+    clear_analysis_results()
+
+
+def active_dataset_available() -> bool:
+    return "active_dataset_bundle" in st.session_state and "active_dataset_df" in st.session_state
+
+
+def get_active_dataset_bundle() -> DatasetBundle:
+    if not active_dataset_available():
+        raise RuntimeError("No dataset loaded. Upload it on the Home page first.")
+    return st.session_state["active_dataset_bundle"]
+
+
+def get_active_dataset_name() -> str:
+    return st.session_state.get("active_dataset_name", "No dataset loaded")
+
+
+def dataset_status_caption() -> str:
+    if not active_dataset_available():
+        return "No shared dataset loaded"
+    bundle = get_active_dataset_bundle()
+    return f"Using shared dataset: {get_active_dataset_name()} | rows={len(bundle.df)} | features={len(bundle.numeric_cols)}"
+
+
+def require_active_dataset() -> DatasetBundle:
+    if not active_dataset_available():
+        st.info("Upload the extracted feature dataset once on the Home page.")
+        st.stop()
+    return get_active_dataset_bundle()
 
 
 def missingness_table(df: pd.DataFrame) -> pd.DataFrame:
@@ -209,9 +261,7 @@ def feature_rankings(df: pd.DataFrame, cols: list[str], target_col: str, random_
             "abs_mean_gap": abs(float(pos[c].mean()) - float(neg[c].mean())),
         })
     out = pd.DataFrame(rows)
-    # out["rank_score"] = out["mutual_info"] + out["rf_importance"] + out["abs_mean_gap"] / max(out["abs_mean_gap"].max(), 1e-12)
     out["mw_signal"] = -np.log10(out["mw_pvalue"].clip(lower=1e-300).fillna(1.0))
-
     out["rank_score"] = (
         0.35 * out["mutual_info"].rank(pct=True)
         + 0.35 * out["rf_importance"].rank(pct=True)
