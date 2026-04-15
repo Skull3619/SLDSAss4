@@ -256,8 +256,14 @@ def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], tar
             "confidence": mis.iloc[test_i]["confidence"],
         }
         for j, (dist, idx) in enumerate(zip(dvec, ivec), start=1):
-            row[f"nn{j}_file"] = train_meta_reset.iloc[idx].get("file_name", f"train_{idx}")
-            row[f"nn{j}_label"] = train_meta_reset.iloc[idx].get("label", "")
+            idx = int(idx)
+            if 0 <= idx < len(train_meta_reset):
+                meta_row = train_meta_reset.iloc[idx]
+                row[f"nn{j}_file"] = meta_row.get("file_name", f"train_{idx}")
+                row[f"nn{j}_label"] = meta_row.get("label", "")
+            else:
+                row[f"nn{j}_file"] = f"train_{idx}"
+                row[f"nn{j}_label"] = "index_out_of_bounds"
             row[f"nn{j}_distance"] = dist
         neighbor_rows.append(row)
     neighbor_df = pd.DataFrame(neighbor_rows)
