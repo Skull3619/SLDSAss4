@@ -20,6 +20,7 @@ from app_utils import infer_dataset_schema, load_feature_table
 st.set_page_config(page_title="Q3 Feature Engineering", page_icon="🧱", layout="wide")
 st.title("🧱 Q3. Feature Engineering")
 
+
 def detect_feature_family(col: str) -> str:
     c = col.lower()
     if c.startswith(("occ_",)):
@@ -33,14 +34,6 @@ def detect_feature_family(col: str) -> str:
     if c.startswith(("centroid_", "min_", "max_", "x_q", "y_q", "z_q", "std_", "mean_", "var_")):
         return "global_geometry"
     return "other"
-
-
-def _minmax(s: pd.Series) -> pd.Series:
-    s = s.astype(float).replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    lo, hi = s.min(), s.max()
-    if hi - lo < 1e-12:
-        return pd.Series(np.zeros(len(s)), index=s.index)
-    return (s - lo) / (hi - lo)
 
 
 def build_rank_table(df: pd.DataFrame, numeric_cols: list[str], target_col: str, random_state: int) -> pd.DataFrame:
@@ -140,7 +133,6 @@ if add_anomaly_score:
     iso.fit(X_scaled)
     aug_df["anomaly_score"] = -iso.score_samples(X_scaled)
 
-# Quick before/after benchmark
 X_before = X.copy()
 X_after = aug_df.drop(columns=[bundle.target_col], errors="ignore").select_dtypes(include=[np.number]).copy()
 
