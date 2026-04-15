@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 
+import pandas as pd
 import plotly.express as px
 import plotly.figure_factory as ff
 import streamlit as st
