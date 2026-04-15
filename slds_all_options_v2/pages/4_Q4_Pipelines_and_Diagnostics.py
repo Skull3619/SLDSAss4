@@ -66,7 +66,7 @@ if res is None:
 
 st.subheader("Benchmark results")
 st.dataframe(res, use_container_width=True)
-fig = px.bar(res.head(20), x="pipeline", y=["macro_f1", "f1_infeasible", "accuracy"], barmode="group", title="Top pipelines")
+fig = px.bar(res.head(20), x="pipeline", y=["macro_f1", "weighted_f1", "balanced_accuracy", "accuracy"], barmode="group", title="Top pipelines")
 fig.update_layout(xaxis_tickangle=-40)
 st.plotly_chart(fig, use_container_width=True)
 q4_payload = st.session_state.get("q4_payload", {})
