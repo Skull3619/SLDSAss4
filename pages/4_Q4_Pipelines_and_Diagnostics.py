@@ -12,16 +12,14 @@ from pipeline_utils import DEFAULT_PIPELINES, benchmark_pipelines, fit_pipeline_
 
 st.set_page_config(page_title="Q4 Pipelines and Diagnostics", page_icon="🧪", layout="wide")
 st.title("🧪 Q4. Many pipelines, benchmark table, and diagnostics")
-st.caption("Generate 50+ pipelines, run at least 10, compare F1 scores, and inspect misclassified samples.")
 
 with st.sidebar:
-    uploaded = st.file_uploader("Upload feature dataset", type=["csv", "xlsx", "parquet"])
+    uploaded = st.file_uploader("Upload feature dataset", type=["csv", "xlsx", "parquet"], key="q4_upload")
     test_size = st.slider("Test fraction", 0.1, 0.4, 0.2, 0.05)
     oversample = st.checkbox("Oversample minority class in training", value=False)
     random_state = st.number_input("Random seed", 0, 9999, 42, 1)
-
 if uploaded is None:
-    st.info("Upload your extracted feature table.")
+    st.info("Upload your extracted feature dataset.")
     st.stop()
 
 df = load_feature_table(uploaded)
@@ -163,11 +161,3 @@ if res is not None:
         file_name="q4_pipeline_benchmark.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-st.subheader("Q5 deployment note")
-st.markdown(
-    """
-Use this Streamlit app with a **feature table**, not the full 9 GB raw dataset.
-That keeps deployment practical and avoids upload-memory failures.
-"""
-)
