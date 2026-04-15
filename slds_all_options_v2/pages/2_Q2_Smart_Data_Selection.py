@@ -13,7 +13,8 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
-from sklearn.metrics.pairwise import cosine_distances, euclidean_distances, mahalanobis_distances
+from sklearn.metrics.pairwise import cosine_distances, euclidean_distances
+from scipy.spatial.distance import cdist
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -123,14 +124,16 @@ def metric_key_from_ui(name: str) -> str:
 def distance_matrix(X: np.ndarray, metric: str) -> np.ndarray:
     if metric == "Euclidean":
         return euclidean_distances(X, X)
+
     if metric == "Cosine":
         return cosine_distances(X, X)
+
     if metric == "Mahalanobis":
-        # robust fallback if covariance is near-singular
         cov = np.cov(X, rowvar=False)
         cov += np.eye(cov.shape[0]) * 1e-6
         VI = np.linalg.pinv(cov)
-        return mahalanobis_distances(X, X, VI=VI)
+        return cdist(X, X, metric="mahalanobis", VI=VI)
+
     raise ValueError(metric)
 
 
