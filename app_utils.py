@@ -14,6 +14,7 @@ from sklearn.feature_selection import mutual_info_classif
 from sklearn.manifold import TSNE
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, StandardScaler
+import streamlit as st
 
 LABEL_TO_TARGET = {"infeasible": 0, "feasible": 1}
 ID_COLS = {"file_name", "file_path", "label", "target", "pred_target", "pred_label", "correct", "pipeline"}
@@ -242,3 +243,35 @@ def select_feature_mode(df: pd.DataFrame, cols: list[str], mode: str = "all") ->
 
 def split_train_test(df: pd.DataFrame, target_col: str, test_size: float = 0.2, random_state: int = 42):
     return train_test_split(df, test_size=test_size, stratify=df[target_col], random_state=random_state)
+
+
+
+def clear_active_dataset() -> None:
+    for key in ["active_dataset_df", "active_dataset_name", "q1_payload", "q2_results", "q3_rank_table", "q3_augmented_df", "q4_results"]:
+        if key in st.session_state:
+            del st.session_state[key]
+
+
+def load_active_dataset(file_obj) -> DatasetBundle:
+    df = load_feature_table(file_obj)
+    bundle = infer_dataset_schema(df)
+    st.session_state["active_dataset_df"] = bundle.df.copy()
+    st.session_state["active_dataset_name"] = getattr(file_obj, "name", "uploaded_dataset")
+    return bundle
+
+
+def require_active_dataset() -> DatasetBundle:
+    df = st.session_state.get("active_dataset_df")
+    if df is None:
+        raise RuntimeError("No active dataset loaded. Go to Home and load a feature dataset first.")
+    return infer_dataset_schema(df.copy())
+
+
+def dataset_status_caption() -> str:
+    name = st.session_state.get("active_dataset_name")
+    if not name:
+        return "No dataset loaded yet. Go to **Home** and load your extracted feature dataset."
+    df = st.session_state.get("active_dataset_df")
+    if isinstance(df, pd.DataFrame):
+        return f"Active dataset: **{name}** | Rows: **{len(df)}** | Columns: **{len(df.columns)}**"
+    return f"Active dataset: **{name}**"
