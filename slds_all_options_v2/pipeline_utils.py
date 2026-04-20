@@ -11,7 +11,7 @@ from sklearn.ensemble import AdaBoostClassifier, ExtraTreesClassifier, GradientB
 from sklearn.feature_selection import SelectKBest, VarianceThreshold, mutual_info_classif
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, balanced_accuracy_score, classification_report, confusion_matrix, f1_score, precision_score, recall_score
 from sklearn.model_selection import StratifiedShuffleSplit, train_test_split
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import KNeighborsClassifier, NearestNeighbors
@@ -21,7 +21,7 @@ from sklearn.preprocessing import RobustScaler, StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.svm import SVC
 
-from app_utils import LABEL_TO_TARGET, add_unsupervised_features, select_feature_mode
+from app_utils import LABEL_TO_TARGET, fit_unsupervised_augmenter, shared_train_test_split, transform_with_unsupervised_augmenter, select_feature_mode
 
 
 @dataclass
@@ -154,11 +154,13 @@ def _oversample_minority(X: pd.DataFrame, y: pd.Series, random_state: int = 42) 
     return X_aug, y_aug
 
 
-def _prepare_xy(df: pd.DataFrame, numeric_cols: list[str], target_col: str, spec: PipelineSpec, random_state: int = 42):
+def _prepare_xy(df: pd.DataFrame, numeric_cols: list[str], target_col: str, spec: PipelineSpec, random_state: int = 42, augmenter: dict | None = None):
     work = df.copy()
     cols = list(numeric_cols)
     if spec.add_unsup:
-        work = add_unsupervised_features(work, cols, random_state=random_state)
+        if augmenter is None:
+            augmenter = fit_unsupervised_augmenter(work, cols, random_state=random_state)
+        work = transform_with_unsupervised_augmenter(work, cols, augmenter)
         cols = [c for c in work.columns if c not in {"file_name", "file_path", "label", "target"} and pd.api.types.is_numeric_dtype(work[c])]
     feat_cols = select_feature_mode(work, cols, spec.feature_mode)
     feat_cols = [c for c in feat_cols if pd.api.types.is_numeric_dtype(work[c])]
@@ -169,11 +171,12 @@ def _prepare_xy(df: pd.DataFrame, numeric_cols: list[str], target_col: str, spec
 
 
 def benchmark_pipelines(df: pd.DataFrame, numeric_cols: list[str], target_col: str, specs: Iterable[PipelineSpec], test_size: float = 0.2, oversample_train: bool = False, random_state: int = 42):
-    train_df, test_df = train_test_split(df, test_size=test_size, stratify=df[target_col], random_state=random_state)
+    train_df, test_df, train_idx, test_idx = shared_train_test_split(df, target_col, test_size=test_size, random_state=random_state, key="pipeline")
     rows = []
     for spec in specs:
-        _, X_train, y_train, _, feat_cols = _prepare_xy(train_df, numeric_cols, target_col, spec, random_state=random_state)
-        _, X_test, y_test, _, _ = _prepare_xy(test_df, numeric_cols, target_col, spec, random_state=random_state)
+        augmenter = fit_unsupervised_augmenter(train_df, numeric_cols, random_state=random_state) if spec.add_unsup else None
+        _, X_train, y_train, _, feat_cols = _prepare_xy(train_df, numeric_cols, target_col, spec, random_state=random_state, augmenter=augmenter)
+        _, X_test, y_test, _, _ = _prepare_xy(test_df, numeric_cols, target_col, spec, random_state=random_state, augmenter=augmenter)
         if oversample_train:
             X_train, y_train = _oversample_minority(X_train, y_train, random_state=random_state)
         est = build_estimator(spec, random_state=random_state)
@@ -191,16 +194,21 @@ def benchmark_pipelines(df: pd.DataFrame, numeric_cols: list[str], target_col: s
             "macro_f1": float(f1_score(y_test, pred, average="macro")),
             "f1_infeasible": float(f1_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"])),
             "accuracy": float(accuracy_score(y_test, pred)),
+            "weighted_f1": float(f1_score(y_test, pred, average="weighted")),
+            "balanced_accuracy": float(balanced_accuracy_score(y_test, pred)),
+            "precision_macro": float(precision_score(y_test, pred, average="macro", zero_division=0)),
+            "recall_macro": float(recall_score(y_test, pred, average="macro", zero_division=0)),
             "precision_infeasible": float(precision_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
             "recall_infeasible": float(recall_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
         })
     return pd.DataFrame(rows).sort_values(["macro_f1", "f1_infeasible", "accuracy"], ascending=False).reset_index(drop=True)
 
 
-def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], target_col: str, spec: PipelineSpec, test_size: float = 0.2, oversample_train: bool = False, random_state: int = 42):
-    train_df, test_df = train_test_split(df, test_size=test_size, stratify=df[target_col], random_state=random_state)
-    _, X_train, y_train, train_meta, feat_cols = _prepare_xy(train_df, numeric_cols, target_col, spec, random_state=random_state)
-    _, X_test, y_test, test_meta, _ = _prepare_xy(test_df, numeric_cols, target_col, spec, random_state=random_state)
+def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], target_col: str, spec: PipelineSpec, test_size: float = 0.2, oversample_train: bool = False, random_state: int = 42, threshold: float = 0.5):
+    train_df, test_df, train_idx, test_idx = shared_train_test_split(df, target_col, test_size=test_size, random_state=random_state, key="pipeline")
+    augmenter = fit_unsupervised_augmenter(train_df, numeric_cols, random_state=random_state) if spec.add_unsup else None
+    _, X_train, y_train, train_meta, feat_cols = _prepare_xy(train_df, numeric_cols, target_col, spec, random_state=random_state, augmenter=augmenter)
+    _, X_test, y_test, test_meta, _ = _prepare_xy(test_df, numeric_cols, target_col, spec, random_state=random_state, augmenter=augmenter)
     if oversample_train:
         X_train, y_train = _oversample_minority(X_train, y_train, random_state=random_state)
     est = build_estimator(spec, random_state=random_state)
@@ -214,9 +222,13 @@ def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], tar
         if LABEL_TO_TARGET["infeasible"] in classes:
             idx = classes.index(LABEL_TO_TARGET["infeasible"])
             prob_infeasible = probs[:, idx]
+            pred = (prob_infeasible < threshold).astype(int) if idx == 1 else (prob_infeasible >= threshold).astype(int)
+            # prob_infeasible is probability of class 0 when classes are [0,1]; use threshold on that directly
+            pred = np.where(prob_infeasible >= threshold, LABEL_TO_TARGET["infeasible"], 1 - LABEL_TO_TARGET["infeasible"])
     elif hasattr(est, "decision_function"):
         scores = est.decision_function(X_test)
         prob_infeasible = 1 / (1 + np.exp(scores))
+        pred = np.where(prob_infeasible >= threshold, LABEL_TO_TARGET["infeasible"], 1 - LABEL_TO_TARGET["infeasible"])
 
     cm = confusion_matrix(y_test, pred)
     report = pd.DataFrame(classification_report(y_test, pred, output_dict=True, zero_division=0)).T
@@ -244,8 +256,14 @@ def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], tar
             "confidence": mis.iloc[test_i]["confidence"],
         }
         for j, (dist, idx) in enumerate(zip(dvec, ivec), start=1):
-            row[f"nn{j}_file"] = train_meta_reset.iloc[idx].get("file_name", f"train_{idx}")
-            row[f"nn{j}_label"] = train_meta_reset.iloc[idx].get("label", "")
+            idx = int(idx)
+            if 0 <= idx < len(train_meta_reset):
+                meta_row = train_meta_reset.iloc[idx]
+                row[f"nn{j}_file"] = meta_row.get("file_name", f"train_{idx}")
+                row[f"nn{j}_label"] = meta_row.get("label", "")
+            else:
+                row[f"nn{j}_file"] = f"train_{idx}"
+                row[f"nn{j}_label"] = "index_out_of_bounds"
             row[f"nn{j}_distance"] = dist
         neighbor_rows.append(row)
     neighbor_df = pd.DataFrame(neighbor_rows)
@@ -262,6 +280,10 @@ def fit_pipeline_with_diagnostics(df: pd.DataFrame, numeric_cols: list[str], tar
         "macro_f1": float(f1_score(y_test, pred, average="macro")),
         "f1_infeasible": float(f1_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"])),
         "accuracy": float(accuracy_score(y_test, pred)),
+        "weighted_f1": float(f1_score(y_test, pred, average="weighted")),
+        "balanced_accuracy": float(balanced_accuracy_score(y_test, pred)),
+        "precision_macro": float(precision_score(y_test, pred, average="macro", zero_division=0)),
+        "recall_macro": float(recall_score(y_test, pred, average="macro", zero_division=0)),
         "precision_infeasible": float(precision_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
         "recall_infeasible": float(recall_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
     }
@@ -417,6 +439,10 @@ def evaluate_subset_strategy(df: pd.DataFrame, numeric_cols: list[str], target_c
         "macro_f1": float(f1_score(y_test, pred, average="macro")),
         "f1_infeasible": float(f1_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"])),
         "accuracy": float(accuracy_score(y_test, pred)),
+        "weighted_f1": float(f1_score(y_test, pred, average="weighted")),
+        "balanced_accuracy": float(balanced_accuracy_score(y_test, pred)),
+        "precision_macro": float(precision_score(y_test, pred, average="macro", zero_division=0)),
+        "recall_macro": float(recall_score(y_test, pred, average="macro", zero_division=0)),
         "precision_infeasible": float(precision_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
         "recall_infeasible": float(recall_score(y_test, pred, pos_label=LABEL_TO_TARGET["infeasible"], zero_division=0)),
     }

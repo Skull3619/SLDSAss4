@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from app_utils import dataset_status_caption, load_active_dataset, clear_active_dataset
+from app_utils import dataset_status_caption, load_active_dataset, clear_active_dataset, get_run_history_df
 
 st.set_page_config(page_title="Manufacturing Feasibility App", page_icon="🧩", layout="wide")
 st.title("🧩 Manufacturing Feasibility Analysis App")
@@ -40,5 +40,9 @@ st.caption(dataset_status_caption())
 
 if st.session_state.get("active_dataset_name"):
     st.info("Use the sidebar pages to run Q1 to Q5. Each page now has its own Run button so the analysis does not start immediately.")
+    hist = get_run_history_df()
+    if not hist.empty:
+        st.subheader("Recent run history")
+        st.dataframe(hist.tail(10), use_container_width=True)
 else:
     st.info("Upload the extracted feature table in the sidebar and click **Load dataset**.")

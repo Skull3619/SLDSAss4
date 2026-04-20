@@ -18,6 +18,7 @@ import streamlit as st
 
 LABEL_TO_TARGET = {"infeasible": 0, "feasible": 1}
 ID_COLS = {"file_name", "file_path", "label", "target", "pred_target", "pred_label", "correct", "pipeline"}
+ABSOLUTE_POSITION_PREFIXES = ("min_", "max_", "centroid_", "x_q", "y_q", "z_q")
 
 
 @dataclass
@@ -97,10 +98,7 @@ def infer_dataset_schema(df: pd.DataFrame) -> DatasetBundle:
 
 
 def missingness_table(df: pd.DataFrame) -> pd.DataFrame:
-    out = pd.DataFrame({
-        "column": df.columns,
-        "missing_count": df.isna().sum().values,
-    })
+    out = pd.DataFrame({"column": df.columns, "missing_count": df.isna().sum().values})
     out["missing_pct"] = out["missing_count"] / max(len(df), 1)
     return out.sort_values(["missing_pct", "missing_count"], ascending=False).reset_index(drop=True)
 
@@ -126,9 +124,133 @@ def build_feature_family_table(cols: Iterable[str]) -> pd.DataFrame:
     return pd.DataFrame([{"feature": c, "family": feature_family(c)} for c in cols])
 
 
+def available_feature_families(cols: Iterable[str]) -> list[str]:
+    fams = build_feature_family_table(cols)["family"].unique().tolist()
+    return sorted(fams)
+
+
+def filter_feature_columns(cols: list[str], include_families: list[str] | None = None, exclude_absolute_position: bool = False) -> list[str]:
+    out = list(cols)
+    if include_families:
+        fam_df = build_feature_family_table(out)
+        out = fam_df.loc[fam_df["family"].isin(include_families), "feature"].tolist()
+    if exclude_absolute_position:
+        out = [c for c in out if not c.lower().startswith(ABSOLUTE_POSITION_PREFIXES)]
+    return out
+
+
 def standardize_frame(df: pd.DataFrame, cols: list[str]) -> np.ndarray:
     X = df[cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=float)
     return StandardScaler().fit_transform(X)
+
+
+def shared_train_test_split(df: pd.DataFrame, target_col: str, test_size: float = 0.2, random_state: int = 42, key: str = "default"):
+    """Use a shared split index in session_state when available."""
+    state_key = f"shared_split::{key}::{len(df)}::{target_col}::{test_size}::{random_state}"
+    if state_key in st.session_state:
+        train_idx, test_idx = st.session_state[state_key]
+        return df.iloc[train_idx].copy(), df.iloc[test_idx].copy(), train_idx, test_idx
+
+    splitter = train_test_split(
+        np.arange(len(df)),
+        test_size=test_size,
+        stratify=df[target_col],
+        random_state=random_state,
+    )
+    train_idx, test_idx = splitter
+    st.session_state[state_key] = (train_idx, test_idx)
+    return df.iloc[train_idx].copy(), df.iloc[test_idx].copy(), train_idx, test_idx
+
+
+def fit_unsupervised_augmenter(train_df: pd.DataFrame, cols: list[str], n_pca: int = 3, n_clusters: int = 4, random_state: int = 42) -> dict:
+    X = train_df[cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=float)
+    scaler = StandardScaler()
+    Xs = scaler.fit_transform(X)
+
+    if len(train_df) < 2:
+        return {
+            "scaler": scaler,
+            "pca": None,
+            "km": None,
+            "iso": None,
+            "n_pca": 0,
+            "n_clusters": 0,
+            "explained_variance_ratio": [],
+            "cluster_sizes": {},
+        }
+
+    pca = None
+    explained_variance_ratio = []
+    if int(n_pca) > 0:
+        k = min(int(n_pca), min(Xs.shape[0] - 1, Xs.shape[1]))
+        if k > 0:
+            pca = PCA(n_components=k, random_state=random_state)
+            pca.fit(Xs)
+            explained_variance_ratio = pca.explained_variance_ratio_.tolist()
+        else:
+            k = 0
+    else:
+        k = 0
+
+    km = None
+    cluster_sizes = {}
+    if int(n_clusters) > 0:
+        kk = min(int(n_clusters), len(train_df))
+        if kk >= 2:
+            km = KMeans(n_clusters=kk, random_state=random_state, n_init=10)
+            train_labels = km.fit_predict(Xs)
+            unique, counts = np.unique(train_labels, return_counts=True)
+            cluster_sizes = {int(u): int(c) for u, c in zip(unique, counts)}
+        else:
+            kk = 0
+    else:
+        kk = 0
+
+    iso = None
+    if len(train_df) >= 10:
+        iso = IsolationForest(random_state=random_state, contamination="auto")
+        iso.fit(Xs)
+
+    return {
+        "scaler": scaler,
+        "pca": pca,
+        "km": km,
+        "iso": iso,
+        "n_pca": k,
+        "n_clusters": kk,
+        "explained_variance_ratio": explained_variance_ratio,
+        "cluster_sizes": cluster_sizes,
+    }
+
+
+def transform_with_unsupervised_augmenter(df: pd.DataFrame, cols: list[str], augmenter: dict) -> pd.DataFrame:
+    out = df.copy()
+    X = out[cols].replace([np.inf, -np.inf], np.nan).fillna(0.0).to_numpy(dtype=float)
+    Xs = augmenter["scaler"].transform(X)
+
+    pca = augmenter.get("pca")
+    if pca is not None and int(augmenter.get("n_pca", 0)) > 0:
+        comps = pca.transform(Xs)
+        for i in range(comps.shape[1]):
+            out[f"unsup_pca_{i+1}"] = comps[:, i]
+
+    km = augmenter.get("km")
+    if km is not None and int(augmenter.get("n_clusters", 0)) > 0:
+        labels = km.predict(Xs)
+        dists = np.linalg.norm(Xs - km.cluster_centers_[labels], axis=1)
+        out["unsup_cluster"] = labels
+        out["unsup_cluster_dist"] = dists
+    else:
+        out["unsup_cluster"] = 0
+        out["unsup_cluster_dist"] = 0.0
+
+    iso = augmenter.get("iso")
+    if iso is not None:
+        out["unsup_anomaly_score"] = -iso.score_samples(Xs)
+    else:
+        out["unsup_anomaly_score"] = 0.0
+
+    return out
 
 
 def compute_embedding(df: pd.DataFrame, cols: list[str], method: str = "PCA", random_state: int = 42, perplexity: int = 20) -> pd.DataFrame:
@@ -153,36 +275,9 @@ def cluster_features(df: pd.DataFrame, cols: list[str], method: str = "kmeans", 
 
 
 def add_unsupervised_features(df: pd.DataFrame, cols: list[str], n_pca: int = 3, n_clusters: int = 4, random_state: int = 42) -> pd.DataFrame:
-    out = df.copy()
-    Xs = standardize_frame(out, cols)
-    if len(out) < 2:
-        for i in range(n_pca):
-            out[f"unsup_pca_{i+1}"] = 0.0
-        out["unsup_cluster"] = 0
-        out["unsup_cluster_dist"] = 0.0
-        out["unsup_anomaly_score"] = 0.0
-        return out
-
-    k = min(max(1, n_pca), min(Xs.shape[0] - 1, Xs.shape[1]))
-    pca = PCA(n_components=k, random_state=random_state)
-    comps = pca.fit_transform(Xs)
-    for i in range(comps.shape[1]):
-        out[f"unsup_pca_{i+1}"] = comps[:, i]
-
-    kk = min(max(2, n_clusters), len(out))
-    km = KMeans(n_clusters=kk, random_state=random_state, n_init=10)
-    labels = km.fit_predict(Xs)
-    dists = np.linalg.norm(Xs - km.cluster_centers_[labels], axis=1)
-    out["unsup_cluster"] = labels
-    out["unsup_cluster_dist"] = dists
-
-    if len(out) >= 10:
-        iso = IsolationForest(random_state=random_state, contamination="auto")
-        iso.fit(Xs)
-        out["unsup_anomaly_score"] = -iso.score_samples(Xs)
-    else:
-        out["unsup_anomaly_score"] = 0.0
-    return out
+    """Backward-compatible full-data augmentation. Use train-only fitter for evaluation."""
+    augmenter = fit_unsupervised_augmenter(df, cols, n_pca=n_pca, n_clusters=n_clusters, random_state=random_state)
+    return transform_with_unsupervised_augmenter(df, cols, augmenter)
 
 
 def feature_rankings(df: pd.DataFrame, cols: list[str], target_col: str, random_state: int = 42) -> pd.DataFrame:
@@ -210,9 +305,7 @@ def feature_rankings(df: pd.DataFrame, cols: list[str], target_col: str, random_
             "abs_mean_gap": abs(float(pos[c].mean()) - float(neg[c].mean())),
         })
     out = pd.DataFrame(rows)
-    # out["rank_score"] = out["mutual_info"] + out["rf_importance"] + out["abs_mean_gap"] / max(out["abs_mean_gap"].max(), 1e-12)
     out["mw_signal"] = -np.log10(out["mw_pvalue"].clip(lower=1e-300).fillna(1.0))
-
     out["rank_score"] = (
         0.35 * out["mutual_info"].rank(pct=True)
         + 0.35 * out["rf_importance"].rank(pct=True)
@@ -220,6 +313,13 @@ def feature_rankings(df: pd.DataFrame, cols: list[str], target_col: str, random_
         + 0.15 * out["mw_signal"].rank(pct=True)
     )
     return out.sort_values("rank_score", ascending=False).reset_index(drop=True)
+
+
+def top_feature_scatter_matrix(df: pd.DataFrame, rank_df: pd.DataFrame, label_col: str, top_n: int = 5) -> pd.DataFrame:
+    top_features = rank_df["feature"].head(top_n).tolist()
+    cols = [c for c in top_features if c in df.columns]
+    out = df[cols + [label_col]].copy() if cols else pd.DataFrame()
+    return out
 
 
 def select_feature_mode(df: pd.DataFrame, cols: list[str], mode: str = "all") -> list[str]:
@@ -245,9 +345,29 @@ def split_train_test(df: pd.DataFrame, target_col: str, test_size: float = 0.2, 
     return train_test_split(df, test_size=test_size, stratify=df[target_col], random_state=random_state)
 
 
+def log_run(page: str, settings: dict, summary: dict | None = None) -> None:
+    history = st.session_state.get("run_history", [])
+    history.append({"page": page, "settings": settings, "summary": summary or {}})
+    st.session_state["run_history"] = history[-50:]
+
+
+def get_run_history_df() -> pd.DataFrame:
+    rows = []
+    for i, item in enumerate(st.session_state.get("run_history", []), start=1):
+        rows.append({
+            "run_id": i,
+            "page": item.get("page"),
+            **{f"setting_{k}": v for k, v in item.get("settings", {}).items()},
+            **{f"summary_{k}": v for k, v in item.get("summary", {}).items()},
+        })
+    return pd.DataFrame(rows)
+
 
 def clear_active_dataset() -> None:
-    for key in ["active_dataset_df", "active_dataset_name", "q1_payload", "q2_results", "q3_rank_table", "q3_augmented_df", "q4_results"]:
+    for key in [
+        "active_dataset_df", "active_dataset_name", "q1_payload", "q2_results", "q3_rank_table", "q3_augmented_df",
+        "q3_payload", "q4_results", "q4_detail", "q5_summary", "run_history"
+    ]:
         if key in st.session_state:
             del st.session_state[key]
 
